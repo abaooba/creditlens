@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Data files (regenerated — run data_loader.py to fetch)
+data/raw.csv
+data/processed*.csv
+data/processed*.parquet
+
+# Model artifacts (retrain locally)
+models/*.joblib
+models/*.pkl
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# SHAP / plot outputs (regenerated)
+data/shap_global.png
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
