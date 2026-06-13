@@ -10,8 +10,11 @@ Given a credit card holder's repayment history, balance, and demographics, predi
 
 ### Key Data Facts
 - **Class imbalance:** ~22% default rate. Accuracy is a misleading metric — a "never default" classifier achieves 78% accuracy while catching 0 actual defaulters. **PR-AUC and recall are the real evaluation metrics.**
-- **Strongest predictors:** The six `PAY_*` repayment-status columns dominate. `PAY_0` (most recent month's repayment status) is the single strongest feature.
-- **Data quirks:** `EDUCATION` values 0, 5, 6 and `MARRIAGE` value 0 are undocumented (absent from the original paper); collapsed to "other" during preprocessing.
+- **Strongest predictors:** The six `PAY_*` repayment-status columns dominate. `PAY_0` (most recent month's repayment status) is the single strongest feature (Pearson r ≈ 0.32–0.40 with default). `LIMIT_BAL` is negatively correlated — higher credit limits indicate borrowers the bank has already pre-screened as lower-risk.
+- **Data quirks (from EDA):**
+  - `EDUCATION` is documented as 1=graduate school, 2=university, 3=high school, 4=others. Values **0, 5, 6** appear in the data (~0.6% of rows) but are absent from the original paper. These are collapsed to 4 ("others") during preprocessing.
+  - `MARRIAGE` is documented as 1=married, 2=single, 3=others. Value **0** appears in ~0.1% of rows with no documented meaning. Collapsed to 3 ("others") during preprocessing.
+  - `BILL_AMT1–6` columns are highly intercorrelated — monthly balances don't shift dramatically month-to-month. Feature engineering (utilization ratio, bill trend) will extract signal while reducing collinearity.
 
 ## Tech Stack
 | Layer | Library |
@@ -62,7 +65,7 @@ streamlit run src/app.py
 ## Progress
 | Phase | Status | Completed |
 |-------|--------|-----------|
-| 1 — Setup & Data Acquisition | in_progress | — |
+| 1 — Setup & Data Acquisition | complete | 2026-06-13 |
 | 2 — Preprocessing | pending | — |
 | 3 — Modeling | pending | — |
 | 4 — Explainability | pending | — |
