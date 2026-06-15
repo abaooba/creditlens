@@ -62,8 +62,8 @@ streamlit run src/app.py
 ## Progress
 | Phase | Status | Completed |
 |-------|--------|-----------|
-| 1 — Setup & Data Acquisition | in_progress | — |
-| 2 — Preprocessing | pending | — |
+| 1 — Setup & Data Acquisition | ✅ complete | 2026-06-15 |
+| 2 — Preprocessing | ✅ complete | 2026-06-15 |
 | 3 — Modeling | pending | — |
 | 4 — Explainability | pending | — |
 | 5 — App & Polish | pending | — |
