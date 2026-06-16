@@ -4,9 +4,13 @@ Preprocessing pipeline for the UCI credit card default dataset.
 Responsibilities:
 - Collapse undocumented EDUCATION (0,5,6) and MARRIAGE (0) categories to "other"
 - Treat PAY_* repayment-status columns as ordered ordinal (months past due)
+- Add four engineered features via src.features.add_features() (row-level, no leakage)
 - Build a stratified 80/20 train/test split with no leakage:
   scalers and encoders are fit on the training set only, then applied to test
 - Return X_train, X_test, y_train, y_test, and the fitted ColumnTransformer
+
+Output feature order (27 total):
+  CONTINUOUS_COLS (14) | ENGINEERED_COLS (4) | PAY_COLS (6) | NOMINAL_INT_COLS (3)
 """
 
 import os
@@ -14,17 +18,17 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OrdinalEncoder
 from sklearn.compose import ColumnTransformer
+
+from src.features import add_features, ENGINEERED_COLS
 
 _MODELS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 _PREPROCESS_PATH = os.path.join(_MODELS_DIR, "preprocess.joblib")
 
 # PAY_* columns represent ordered repayment-status codes
-# -2=no consumption, -1=pay duly, 0=revolving credit, 1–9=months past due
+# -2=no consumption, -1=pay duly, 0=revolving credit, 1-9=months past due
 PAY_COLS = ["PAY_0", "PAY_2", "PAY_3", "PAY_4", "PAY_5", "PAY_6"]
-# Possible ordered categories across all six repayment columns
 PAY_CATEGORIES = [[-2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]] * len(PAY_COLS)
 
 CONTINUOUS_COLS = [
@@ -33,15 +37,15 @@ CONTINUOUS_COLS = [
     "PAY_AMT1", "PAY_AMT2", "PAY_AMT3", "PAY_AMT4", "PAY_AMT5", "PAY_AMT6",
 ]
 
-# Nominal categoricals kept as integers after collapse
+# Nominal categoricals kept as integers after category collapse
 NOMINAL_INT_COLS = ["SEX", "EDUCATION", "MARRIAGE"]
 
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
     """Collapse undocumented categories in EDUCATION and MARRIAGE.
 
-    EDUCATION: values 0, 5, 6 are undocumented; map them to 4 ("others").
-    MARRIAGE:  value 0 is undocumented; map to 3 ("others").
+    EDUCATION: values 0, 5, 6 are undocumented; map them to 4 (\"others\").
+    MARRIAGE:  value 0 is undocumented; map to 3 (\"others\").
     """
     df = df.copy()
     df["EDUCATION"] = df["EDUCATION"].replace({0: 4, 5: 4, 6: 4})
@@ -72,12 +76,14 @@ def build_split(
     -------
     X_train, X_test, y_train, y_test, ct
         Where `ct` is the fitted sklearn ColumnTransformer.
+        Feature matrix has 27 columns (14 continuous + 4 engineered + 6 PAY + 3 nominal).
     """
     if df is None:
         from src.data_loader import load_raw
         df = load_raw()
 
     df = clean(df)
+    df = add_features(df)    # row-level only — no leakage risk
 
     X = df.drop(columns=["default"])
     y = df["default"]
@@ -90,14 +96,19 @@ def build_split(
         stratify=y,
     )
 
-    # ColumnTransformer: scale continuous, encode PAY_* as ordinal
-    # NOMINAL_INT_COLS (SEX, EDUCATION, MARRIAGE) are passed through as-is
+    # ColumnTransformer: scale continuous + engineered, encode PAY_* ordinal,
+    # pass nominal ints through as-is
     ct = ColumnTransformer(
         transformers=[
             (
                 "continuous",
                 StandardScaler(),
                 CONTINUOUS_COLS,
+            ),
+            (
+                "engineered",
+                StandardScaler(),
+                ENGINEERED_COLS,
             ),
             (
                 "pay_ordinal",
@@ -129,6 +140,6 @@ def build_split(
     return X_train_t, X_test_t, y_train, y_test, ct
 
 
-def get_feature_names(ct: ColumnTransformer) -> list[str]:
-    """Return ordered column names matching the transformer output."""
-    return CONTINUOUS_COLS + PAY_COLS + NOMINAL_INT_COLS
+def get_feature_names(ct: ColumnTransformer = None) -> list[str]:
+    """Return ordered column names matching the transformer output (27 total)."""
+    return CONTINUOUS_COLS + ENGINEERED_COLS + PAY_COLS + NOMINAL_INT_COLS

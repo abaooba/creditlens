@@ -13,9 +13,21 @@ Given a credit card holder's repayment history, balance, and demographics, predi
 - **Strongest predictors:** The six `PAY_*` repayment-status columns dominate. `PAY_0` (most recent month's repayment status) is the single strongest feature.
 - **Data quirks:** `EDUCATION` values 0, 5, 6 and `MARRIAGE` value 0 are undocumented (absent from the original paper); collapsed to "other" during preprocessing.
 
+## Engineered Features
+Four domain-driven features are added before model training to capture credit-risk signals not explicit in the raw columns:
+
+| Feature | Formula | Credit Meaning |
+|---------|---------|----------------|
+| `utilization` | `BILL_AMT1 / LIMIT_BAL` | Current credit utilisation — the #2 FICO factor |
+| `avg_pay_ratio` | mean(`PAY_AMT_i / \|BILL_AMT_i\|`) | Payment consistency across 6 months |
+| `months_delinquent` | count(`PAY_* > 0`) | How often the borrower was past due |
+| `bill_trend` | OLS slope of `BILL_AMT1..6` / `LIMIT_BAL` | Rising vs. falling balance trajectory |
+
+All features are computed row-by-row with no cross-row state — verified by `src/features.py:verify_no_leakage()`.
+
 ## Tech Stack
 | Layer | Library |
-|-------|---------|
+|-------|---------||
 | Data | `ucimlrepo`, `pandas`, `numpy` |
 | ML | `scikit-learn`, `xgboost` |
 | Explainability | `shap` |
@@ -34,8 +46,8 @@ creditlens/
 │   └── 01_eda.ipynb   # exploratory analysis
 └── src/
     ├── data_loader.py # fetch + cache UCI dataset
-    ├── preprocess.py  # cleaning, encoding, train/test split
-    ├── features.py    # engineered features
+    ├── preprocess.py  # cleaning, encoding, train/test split (27-feature matrix)
+    ├── features.py    # four engineered credit-risk features
     ├── train.py       # fit logistic regression + xgboost
     ├── evaluate.py    # ROC/PR/calibration metrics + plots
     ├── explain.py     # SHAP global + local explanations
@@ -50,6 +62,9 @@ pip install -r requirements.txt
 # Verify data pipeline (prints (30000, 24))
 python -c "from src.data_loader import load_raw; print(load_raw().shape)"
 
+# Verify engineered features are leak-free
+python src/features.py
+
 # Run the Streamlit app (available after Phase 5)
 streamlit run src/app.py
 ```
@@ -58,12 +73,13 @@ streamlit run src/app.py
 1. **"Why accuracy is the wrong metric here."** Defaults are ~22% of the dataset; a trivial "always predict no-default" classifier achieves 78% accuracy while catching zero actual defaults. PR-AUC and recall-at-threshold are the correct objectives for this imbalanced problem.
 2. **"Calibration vs. discrimination."** A model can rank borrowers correctly (high AUC) yet output systematically mis-scaled probabilities. Calibration matters because a lender uses the raw probability to *price risk*, not just to rank applicants.
 3. **"Explainability as a legal requirement."** Under fair-lending / adverse-action rules, a lender must disclose *why* a credit decision was made. SHAP produces a defensible per-applicant reason list — the difference between a research model and a deployable one.
+4. **"Feature engineering as domain knowledge."** The four engineered features (utilization, payment ratio, delinquency count, balance trend) mirror the actual factors FICO uses to compute credit scores. Encoding domain knowledge directly into features reduces what the model has to learn from data alone.
 
 ## Progress
 | Phase | Status | Completed |
 |-------|--------|-----------|
 | 1 — Setup & Data Acquisition | ✅ complete | 2026-06-15 |
-| 2 — Preprocessing | ✅ complete | 2026-06-15 |
+| 2 — Preprocessing & Feature Engineering | ✅ complete | 2026-06-16 |
 | 3 — Modeling | pending | — |
 | 4 — Explainability | pending | — |
 | 5 — App & Polish | pending | — |
