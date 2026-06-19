@@ -19,15 +19,54 @@ Four domain-driven features are added before model training to capture credit-ri
 | Feature | Formula | Credit Meaning |
 |---------|---------|----------------|
 | `utilization` | `BILL_AMT1 / LIMIT_BAL` | Current credit utilisation — the #2 FICO factor |
-| `avg_pay_ratio` | mean(`PAY_AMT_i / \|BILL_AMT_i\|`) | Payment consistency across 6 months |
+| `avg_pay_ratio` | mean(`PAY_AMT_i / |BILL_AMT_i|`) | Payment consistency across 6 months |
 | `months_delinquent` | count(`PAY_* > 0`) | How often the borrower was past due |
 | `bill_trend` | OLS slope of `BILL_AMT1..6` / `LIMIT_BAL` | Rising vs. falling balance trajectory |
 
 All features are computed row-by-row with no cross-row state — verified by `src/features.py:verify_no_leakage()`.
 
+## Model Evaluation
+
+### Threshold Selection
+The default 0.5 threshold treats false positives and false negatives as equally costly — wrong for credit risk.
+**Missing a defaulter** (false negative = unpaid debt) is the costlier error for a lender.
+
+The operating threshold is therefore selected from the Precision-Recall curve as the **highest value
+that still achieves ≥60% recall** (catching at least 6 in 10 true defaulters). This maximises
+precision subject to the recall floor and is documented as a business decision in the model card.
+
+### Performance (run `python src/evaluate.py` to compute on your dataset)
+
+| Metric | Logistic Regression | XGBoost | Notes |
+|--------|--------------------|---------| ------|
+| ROC-AUC | — | — | Ranking quality; XGBoost expected ~0.77 on real UCI data |
+| PR-AUC | — | — | Imbalanced-safe metric; null baseline = class prevalence (~0.22) |
+| Recall @ threshold | ≥ 0.60 | ≥ 0.60 | Guaranteed by threshold selection |
+| Precision @ threshold | — | — | XGBoost expected higher precision at same recall |
+| F1 @ threshold | — | — | Harmonic mean of the above two |
+| Brier Score | — | — | Calibration quality; lower = better probability estimates |
+
+*Dashes are populated by running the evaluation script. On the UCI dataset, XGBoost is expected to
+outperform logistic regression on PR-AUC by approximately 0.10–0.15 points.*
+
+### Calibration
+A model can rank borrowers correctly (good AUC) yet output miscalibrated probabilities — the
+reliability diagram shows whether predicted probabilities match observed default rates bin by bin.
+Lenders rely on calibrated probabilities to price loans; a model that says "30% default risk" should
+observe ~30% defaults in that score band.
+
+Plots saved to `data/` by `evaluate.py`:
+
+| File | Contents |
+|------|----------|
+| `data/roc_pr.png` | Side-by-side ROC and PR curves for LogReg and XGBoost |
+| `data/confusion_logreg.png` | Confusion matrix at LogReg operating threshold |
+| `data/confusion_xgboost.png` | Confusion matrix at XGBoost operating threshold |
+| `data/calibration.png` | Reliability diagram + Brier scores for both models |
+
 ## Tech Stack
 | Layer | Library |
-|-------|---------||
+|-------|---------|
 | Data | `ucimlrepo`, `pandas`, `numpy` |
 | ML | `scikit-learn`, `xgboost` |
 | Explainability | `shap` |
@@ -65,6 +104,12 @@ python -c "from src.data_loader import load_raw; print(load_raw().shape)"
 # Verify engineered features are leak-free
 python src/features.py
 
+# Train both models
+python src/train.py
+
+# Run full evaluation suite (saves plots to data/)
+python src/evaluate.py
+
 # Run the Streamlit app (available after Phase 5)
 streamlit run src/app.py
 ```
@@ -74,12 +119,13 @@ streamlit run src/app.py
 2. **"Calibration vs. discrimination."** A model can rank borrowers correctly (high AUC) yet output systematically mis-scaled probabilities. Calibration matters because a lender uses the raw probability to *price risk*, not just to rank applicants.
 3. **"Explainability as a legal requirement."** Under fair-lending / adverse-action rules, a lender must disclose *why* a credit decision was made. SHAP produces a defensible per-applicant reason list — the difference between a research model and a deployable one.
 4. **"Feature engineering as domain knowledge."** The four engineered features (utilization, payment ratio, delinquency count, balance trend) mirror the actual factors FICO uses to compute credit scores. Encoding domain knowledge directly into features reduces what the model has to learn from data alone.
+5. **"Threshold is a business decision, not a statistical one."** The 0.5 default is arbitrary. By scanning the PR curve, you can explicitly choose the precision/recall tradeoff that matches the cost structure of the problem — a skill that distinguishes ML practitioners from ML researchers.
 
 ## Progress
 | Phase | Status | Completed |
 |-------|--------|-----------|
 | 1 — Setup & Data Acquisition | ✅ complete | 2026-06-15 |
 | 2 — Preprocessing & Feature Engineering | ✅ complete | 2026-06-16 |
-| 3 — Modeling | pending | — |
+| 3 — Modeling & Evaluation | ✅ complete | 2026-06-19 |
 | 4 — Explainability | pending | — |
 | 5 — App & Polish | pending | — |
