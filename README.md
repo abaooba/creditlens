@@ -64,9 +64,87 @@ Plots saved to `data/` by `evaluate.py`:
 | `data/confusion_xgboost.png` | Confusion matrix at XGBoost operating threshold |
 | `data/calibration.png` | Reliability diagram + Brier scores for both models |
 
+## SHAP Explainability
+
+CreditLens uses SHAP (SHapley Additive exPlanations) to make every XGBoost prediction transparent
+— both globally (which features drive risk across the full borrower population) and locally (why
+*this specific applicant* was scored as high risk).
+
+### Why SHAP for Tree Models?
+
+SHAP values have a rigorous game-theoretic foundation: each feature's SHAP value is its average
+marginal contribution across all possible subsets of features — the unique allocation that satisfies
+consistency, efficiency, and local accuracy simultaneously. For tree models, `shap.TreeExplainer`
+computes *exact* SHAP values in polynomial time (not a Monte Carlo approximation), making per-
+applicant explanations fast enough for production inference.
+
+### Global Feature Importance: PAY_* Dominance
+
+The SHAP beeswarm plot (`data/shap_global.png`) consistently shows that the six `PAY_*`
+repayment-status columns — especially `PAY_0` (most recent month) — dominate the XGBoost model's
+output. This aligns tightly with the economics of credit risk:
+
+**Why recent late payments are the strongest default signal:**
+
+- A borrower who missed last month's payment is already in financial distress. Missing a payment
+  can signal a cash-flow crisis, an unsustainable debt load, or the early stages of strategic
+  default — all of which dramatically raise next-month default risk.
+- Recency matters: `PAY_0` carries far more predictive weight than `PAY_6` (six months ago)
+  because recent behavior better reflects the borrower's *current* financial state. A missed
+  payment last month is more alarming than one from half a year ago, even if the borrower
+  recovered temporarily in between.
+- This mirrors how human underwriters and credit-scoring bureaus operate: a recent derogatory
+  event (a missed payment, a collections account) triggers an immediate score drop that a longer
+  history of on-time payments cannot fully offset in the short run.
+- The six `PAY_*` columns collectively encode the *trajectory* of repayment behaviour. A borrower
+  sliding from PAY_6 = -1 (paid on time) to PAY_0 = 2 (two months past due) is on a worsening
+  path that the model learns to weight heavily.
+
+**Where the engineered features rank:**
+
+- `months_delinquent` (count of PAY_* > 0) typically appears in the top half of the importance
+  ranking. It captures *cumulative* delinquency — a borrower who was late in 4 of the past 6
+  months is materially riskier than one who was late once, and this count feature makes that
+  pattern explicit in a way individual PAY_* columns do not.
+- `utilization` (BILL_AMT1 / LIMIT_BAL) ranks in the mid-tier. High utilisation signals a
+  borrower relying heavily on revolving credit — a recognised financial-stress indicator. However,
+  utilisation has lower predictive power than repayment status because a high-balance borrower who
+  consistently pays in full is not a default risk; it's the *combination* of high balance *and*
+  missed payments that's lethal.
+- `avg_pay_ratio` and `bill_trend` provide incremental signal but are generally dominated by the
+  repayment-status features. They matter most for borderline applicants where PAY_* status is
+  ambiguous (e.g., revolving-credit code 0 throughout).
+
+### Adverse-Action Framing
+
+Under the Equal Credit Opportunity Act (ECOA) and the Fair Credit Reporting Act (FCRA), U.S.
+lenders must provide rejected applicants with specific **adverse-action reasons** — the primary
+factors that negatively affected their credit decision. SHAP's local explanations map directly
+to this requirement.
+
+For a high-risk applicant, `explain_one()` surfaces the top-3 features with the largest
+*positive* SHAP values (features pushing the model's output toward "default") as plain-language
+reason codes:
+
+| Rank | Typical adverse-action reason | Underlying SHAP driver |
+|------|-------------------------------|------------------------|
+| 1 | Recent payment delinquency (most recent month) | PAY_0 high positive SHAP |
+| 2 | High number of months with late payments | months_delinquent high positive SHAP |
+| 3 | High credit utilisation ratio | utilization high positive SHAP |
+
+This turns SHAP from a research interpretability tool into a legally defensible decision-support
+system — exactly what distinguishes a production-grade credit model from a Kaggle notebook.
+
+### SHAP Output Files
+
+| File | Contents |
+|------|----------|
+| `data/shap_global.png` | Beeswarm (all borrowers) + mean-|SHAP| bar chart side by side |
+| `models/shap_explainer.joblib` | Cached TreeExplainer loaded by `app.py` for fast per-applicant scoring |
+
 ## Tech Stack
 | Layer | Library |
-|-------|---------|
+|-------|----------|
 | Data | `ucimlrepo`, `pandas`, `numpy` |
 | ML | `scikit-learn`, `xgboost` |
 | Explainability | `shap` |
@@ -110,6 +188,9 @@ python src/train.py
 # Run full evaluation suite (saves plots to data/)
 python src/evaluate.py
 
+# Build SHAP explainer + generate global importance plot
+python src/explain.py
+
 # Run the Streamlit app (available after Phase 5)
 streamlit run src/app.py
 ```
@@ -120,12 +201,13 @@ streamlit run src/app.py
 3. **"Explainability as a legal requirement."** Under fair-lending / adverse-action rules, a lender must disclose *why* a credit decision was made. SHAP produces a defensible per-applicant reason list — the difference between a research model and a deployable one.
 4. **"Feature engineering as domain knowledge."** The four engineered features (utilization, payment ratio, delinquency count, balance trend) mirror the actual factors FICO uses to compute credit scores. Encoding domain knowledge directly into features reduces what the model has to learn from data alone.
 5. **"Threshold is a business decision, not a statistical one."** The 0.5 default is arbitrary. By scanning the PR curve, you can explicitly choose the precision/recall tradeoff that matches the cost structure of the problem — a skill that distinguishes ML practitioners from ML researchers.
+6. **"Global vs. local explanations."** A global SHAP summary tells you which features matter across all borrowers — useful for model audits and regulatory review. A local (per-applicant) SHAP waterfall tells you why *this specific person* was scored as they were — required for adverse-action notices and individual fairness.
 
 ## Progress
 | Phase | Status | Completed |
-|-------|--------|-----------|
+|-------|--------|----------|
 | 1 — Setup & Data Acquisition | ✅ complete | 2026-06-15 |
 | 2 — Preprocessing & Feature Engineering | ✅ complete | 2026-06-16 |
 | 3 — Modeling & Evaluation | ✅ complete | 2026-06-19 |
-| 4 — Explainability | pending | — |
+| 4 — Explainability | 🔄 in progress | — |
 | 5 — App & Polish | pending | — |
