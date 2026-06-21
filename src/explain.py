@@ -1,5 +1,4 @@
-"""
-SHAP-based explainability for the CreditLens XGBoost model.
+"""SHAP-based explainability for the CreditLens XGBoost model.
 
 Functions
 ---------
@@ -7,12 +6,20 @@ build_explainer(model, X_background)
     Create a shap.TreeExplainer and compute SHAP values for the background set.
     Caches the explainer to models/shap_explainer.joblib for reuse in the app.
 
+load_explainer()
+    Load the cached TreeExplainer from disk; raises FileNotFoundError if missing.
+    Call this in the Streamlit app via @st.cache_resource.
+
 global_importance(shap_values, X_background, feature_names, out_path)
     Generate beeswarm + mean-|SHAP| bar chart side by side; save to data/shap_global.png.
 
 explain_one(explainer, row, feature_names)
     Compute SHAP values for a single applicant; return top drivers + adverse-action reasons.
     Used by the Phase-5 Streamlit app to render a per-applicant waterfall chart.
+
+plot_waterfall(result, max_display, out_path)
+    Render a SHAP waterfall chart from explain_one() output.
+    Returns a matplotlib Figure ready for st.pyplot() in the Streamlit app.
 """
 
 import os
@@ -103,6 +110,30 @@ def build_explainer(model, X_background: np.ndarray):
     print(f"SHAP values shape    : {shap_values.shape}")
 
     return explainer, shap_values
+
+
+def load_explainer():
+    """Load the cached SHAP TreeExplainer from disk.
+
+    The Streamlit app calls this at startup via @st.cache_resource so the
+    explainer is shared across all user sessions without re-instantiation.
+
+    Returns
+    -------
+    shap.TreeExplainer
+
+    Raises
+    ------
+    FileNotFoundError
+        If models/shap_explainer.joblib has not been built yet.
+        Run `python -m src.explain` to build and cache it.
+    """
+    if not os.path.exists(_EXPLAINER_PATH):
+        raise FileNotFoundError(
+            f"SHAP explainer not found at {_EXPLAINER_PATH}. "
+            "Run `python -m src.explain` to build and cache it first."
+        )
+    return joblib.load(_EXPLAINER_PATH)
 
 
 def global_importance(
@@ -214,7 +245,7 @@ def explain_one(
     Parameters
     ----------
     explainer : shap.TreeExplainer
-        Cached explainer from build_explainer().
+        Cached explainer from build_explainer() or load_explainer().
     row : np.ndarray
         Single-applicant feature vector, shape (n_features,) or (1, n_features).
         Must be preprocessed (scaled/encoded) the same way as the training data.
@@ -266,6 +297,59 @@ def explain_one(
     }
 
 
+def plot_waterfall(
+    result: dict,
+    max_display: int = 15,
+    out_path: str = None,
+) -> plt.Figure:
+    """Render a SHAP waterfall chart for a single applicant.
+
+    Wraps the explain_one() output in a shap.Explanation object and calls
+    shap.plots.waterfall() so the chart uses official SHAP formatting:
+    red bars push the score toward default, blue bars pull it away from default.
+    The base value (population average) and the applicant's final score are
+    annotated on the x-axis.
+
+    The returned Figure is passed directly to st.pyplot() in the Streamlit
+    app — no file I/O is required during live per-applicant scoring.
+
+    Parameters
+    ----------
+    result : dict
+        Output of explain_one().
+    max_display : int
+        Max features to show individually; remainder grouped as "other features".
+    out_path : str, optional
+        If given, save the figure to this path (used by __main__ for a sample PNG).
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    exp = shap.Explanation(
+        values=result["shap_values"],
+        base_values=result["base_value"],
+        data=result["feature_values"],
+        feature_names=result["feature_names"],
+    )
+
+    plt.figure()
+    shap.plots.waterfall(exp, max_display=max_display, show=False)
+    fig = plt.gcf()
+    fig.set_size_inches(10, max(6, min(max_display * 0.45, 12)))
+    plt.tight_layout()
+
+    if out_path:
+        os.makedirs(
+            os.path.dirname(out_path) if os.path.dirname(out_path) else ".",
+            exist_ok=True,
+        )
+        fig.savefig(out_path, dpi=120, bbox_inches="tight")
+        print(f"Waterfall plot       → {out_path}")
+
+    return fig
+
+
 if __name__ == "__main__":
     import joblib as _joblib
     from src.data_loader import load_raw
@@ -285,8 +369,16 @@ if __name__ == "__main__":
         print("Training XGBoost (no persisted model found)...")
         xgb, _, _ = train_xgb()
 
-    print("\n=== Building SHAP Explainer ===")
-    explainer, shap_values = build_explainer(xgb, X_train)
+    # Build the explainer (or load if already cached)
+    if os.path.exists(_EXPLAINER_PATH):
+        print("\n=== Loading Cached Explainer ===")
+        explainer = load_explainer()
+        raw = explainer.shap_values(X_train)
+        shap_values = raw[1] if isinstance(raw, list) else raw
+        print(f"Loaded  ← {_EXPLAINER_PATH}")
+    else:
+        print("\n=== Building SHAP Explainer ===")
+        explainer, shap_values = build_explainer(xgb, X_train)
 
     print("\n=== Global Feature Importance ===")
     out = global_importance(shap_values, X_train, feature_names)
@@ -308,3 +400,8 @@ if __name__ == "__main__":
     print("Adverse-action reasons:")
     for i, reason in enumerate(result["adverse_action"], 1):
         print(f"  {i}. {reason}")
+
+    print("\n=== Waterfall Chart ===")
+    waterfall_path = os.path.join(_DATA_DIR, "shap_waterfall_sample.png")
+    plot_waterfall(result, max_display=15, out_path=waterfall_path)
+    print("Phase 4 complete — all SHAP outputs generated.")

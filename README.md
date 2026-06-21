@@ -9,9 +9,9 @@ Given a credit card holder's repayment history, balance, and demographics, predi
 [UCI Default of Credit Card Clients](https://archive.ics.uci.edu/dataset/350/default+of+credit+card+clients) — 30,000 Taiwanese cardholders, 23 features.
 
 ### Key Data Facts
-- **Class imbalance:** ~22% default rate. Accuracy is a misleading metric — a "never default" classifier achieves 78% accuracy while catching 0 actual defaulters. **PR-AUC and recall are the real evaluation metrics.**
+- **Class imbalance:** ~22% default rate. Accuracy is a misleading metric — a \"never default\" classifier achieves 78% accuracy while catching 0 actual defaulters. **PR-AUC and recall are the real evaluation metrics.**
 - **Strongest predictors:** The six `PAY_*` repayment-status columns dominate. `PAY_0` (most recent month's repayment status) is the single strongest feature.
-- **Data quirks:** `EDUCATION` values 0, 5, 6 and `MARRIAGE` value 0 are undocumented (absent from the original paper); collapsed to "other" during preprocessing.
+- **Data quirks:** `EDUCATION` values 0, 5, 6 and `MARRIAGE` value 0 are undocumented (absent from the original paper); collapsed to \"other\" during preprocessing.
 
 ## Engineered Features
 Four domain-driven features are added before model training to capture credit-risk signals not explicit in the raw columns:
@@ -52,7 +52,7 @@ outperform logistic regression on PR-AUC by approximately 0.10–0.15 points.*
 ### Calibration
 A model can rank borrowers correctly (good AUC) yet output miscalibrated probabilities — the
 reliability diagram shows whether predicted probabilities match observed default rates bin by bin.
-Lenders rely on calibrated probabilities to price loans; a model that says "30% default risk" should
+Lenders rely on calibrated probabilities to price loans; a model that says \"30% default risk\" should
 observe ~30% defaults in that score band.
 
 Plots saved to `data/` by `evaluate.py`:
@@ -123,7 +123,7 @@ factors that negatively affected their credit decision. SHAP's local explanation
 to this requirement.
 
 For a high-risk applicant, `explain_one()` surfaces the top-3 features with the largest
-*positive* SHAP values (features pushing the model's output toward "default") as plain-language
+*positive* SHAP values (features pushing the model's output toward \"default\") as plain-language
 reason codes:
 
 | Rank | Typical adverse-action reason | Underlying SHAP driver |
@@ -140,7 +140,8 @@ system — exactly what distinguishes a production-grade credit model from a Kag
 | File | Contents |
 |------|----------|
 | `data/shap_global.png` | Beeswarm (all borrowers) + mean-|SHAP| bar chart side by side |
-| `models/shap_explainer.joblib` | Cached TreeExplainer loaded by `app.py` for fast per-applicant scoring |
+| `data/shap_waterfall_sample.png` | Per-applicant waterfall chart for a sample test-set row |
+| `models/shap_explainer.joblib` | Cached TreeExplainer loaded by `app.py` via `load_explainer()` for fast per-applicant scoring |
 
 ## Tech Stack
 | Layer | Library |
@@ -188,26 +189,29 @@ python src/train.py
 # Run full evaluation suite (saves plots to data/)
 python src/evaluate.py
 
-# Build SHAP explainer + generate global importance plot
-python src/explain.py
+# Build SHAP explainer + generate global importance + sample waterfall
+python -m src.explain
+
+# Load cached explainer in your own code
+# from src.explain import load_explainer, explain_one, plot_waterfall
 
 # Run the Streamlit app (available after Phase 5)
 streamlit run src/app.py
 ```
 
 ## Interview Talking Points
-1. **"Why accuracy is the wrong metric here."** Defaults are ~22% of the dataset; a trivial "always predict no-default" classifier achieves 78% accuracy while catching zero actual defaults. PR-AUC and recall-at-threshold are the correct objectives for this imbalanced problem.
-2. **"Calibration vs. discrimination."** A model can rank borrowers correctly (high AUC) yet output systematically mis-scaled probabilities. Calibration matters because a lender uses the raw probability to *price risk*, not just to rank applicants.
-3. **"Explainability as a legal requirement."** Under fair-lending / adverse-action rules, a lender must disclose *why* a credit decision was made. SHAP produces a defensible per-applicant reason list — the difference between a research model and a deployable one.
-4. **"Feature engineering as domain knowledge."** The four engineered features (utilization, payment ratio, delinquency count, balance trend) mirror the actual factors FICO uses to compute credit scores. Encoding domain knowledge directly into features reduces what the model has to learn from data alone.
-5. **"Threshold is a business decision, not a statistical one."** The 0.5 default is arbitrary. By scanning the PR curve, you can explicitly choose the precision/recall tradeoff that matches the cost structure of the problem — a skill that distinguishes ML practitioners from ML researchers.
-6. **"Global vs. local explanations."** A global SHAP summary tells you which features matter across all borrowers — useful for model audits and regulatory review. A local (per-applicant) SHAP waterfall tells you why *this specific person* was scored as they were — required for adverse-action notices and individual fairness.
+1. **\"Why accuracy is the wrong metric here.\"** Defaults are ~22% of the dataset; a trivial \"always predict no-default\" classifier achieves 78% accuracy while catching zero actual defaults. PR-AUC and recall-at-threshold are the correct objectives for this imbalanced problem.
+2. **\"Calibration vs. discrimination.\"** A model can rank borrowers correctly (high AUC) yet output systematically mis-scaled probabilities. Calibration matters because a lender uses the raw probability to *price risk*, not just to rank applicants.
+3. **\"Explainability as a legal requirement.\"** Under fair-lending / adverse-action rules, a lender must disclose *why* a credit decision was made. SHAP produces a defensible per-applicant reason list — the difference between a research model and a deployable one.
+4. **\"Feature engineering as domain knowledge.\"** The four engineered features (utilization, payment ratio, delinquency count, balance trend) mirror the actual factors FICO uses to compute credit scores. Encoding domain knowledge directly into features reduces what the model has to learn from data alone.
+5. **\"Threshold is a business decision, not a statistical one.\"** The 0.5 default is arbitrary. By scanning the PR curve, you can explicitly choose the precision/recall tradeoff that matches the cost structure of the problem — a skill that distinguishes ML practitioners from ML researchers.
+6. **\"Global vs. local explanations.\"** A global SHAP summary tells you which features matter across all borrowers — useful for model audits and regulatory review. A local (per-applicant) SHAP waterfall tells you why *this specific person* was scored as they were — required for adverse-action notices and individual fairness.
 
 ## Progress
 | Phase | Status | Completed |
-|-------|--------|----------|
+|-------|--------|-----------|
 | 1 — Setup & Data Acquisition | ✅ complete | 2026-06-15 |
 | 2 — Preprocessing & Feature Engineering | ✅ complete | 2026-06-16 |
 | 3 — Modeling & Evaluation | ✅ complete | 2026-06-19 |
-| 4 — Explainability | 🔄 in progress | — |
+| 4 — Explainability | ✅ complete | 2026-06-21 |
 | 5 — App & Polish | pending | — |
