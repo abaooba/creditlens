@@ -1,5 +1,7 @@
 # CreditLens — ML Credit Default Risk Scorer
 
+**[Live Demo →](#)** *(deploy to Streamlit Cloud — instructions in [Running Locally](#running-locally))*
+
 End-to-end machine-learning system that predicts credit card default probability and explains each decision via SHAP. Built on 30,000 real cardholder records from UCI; no API key required.
 
 ## Problem
@@ -35,19 +37,24 @@ The operating threshold is therefore selected from the Precision-Recall curve as
 that still achieves ≥60% recall** (catching at least 6 in 10 true defaulters). This maximises
 precision subject to the recall floor and is documented as a business decision in the model card.
 
-### Performance (run `python src/evaluate.py` to compute on your dataset)
+### Model Comparison
 
 | Metric | Logistic Regression | XGBoost | Notes |
 |--------|--------------------|---------| ------|
-| ROC-AUC | — | — | Ranking quality; XGBoost expected ~0.77 on real UCI data |
-| PR-AUC | — | — | Imbalanced-safe metric; null baseline = class prevalence (~0.22) |
-| Recall @ threshold | ≥ 0.60 | ≥ 0.60 | Guaranteed by threshold selection |
-| Precision @ threshold | — | — | XGBoost expected higher precision at same recall |
-| F1 @ threshold | — | — | Harmonic mean of the above two |
-| Brier Score | — | — | Calibration quality; lower = better probability estimates |
+| ROC-AUC | 0.586 | 0.579 | Ranking quality across all thresholds |
+| PR-AUC | 0.289 | 0.284 | Imbalanced-safe metric; null baseline = class prevalence (~0.22) |
+| Recall @ threshold | 60.1% | 60.1% | Floor guaranteed by threshold selection |
+| Precision @ threshold | 26.5% | 26.2% | Precision subject to 60% recall floor |
+| F1 @ threshold | 0.368 | 0.365 | Harmonic mean of precision and recall |
+| Brier Score | 0.244 | 0.242 | Calibration quality; XGBoost is marginally better calibrated |
+| Operating threshold | 0.488 | 0.487 | Chosen from PR curve (see Threshold Selection) |
 
-*Dashes are populated by running the evaluation script. On the UCI dataset, XGBoost is expected to
-outperform logistic regression on PR-AUC by approximately 0.10–0.15 points.*
+> **Note on training data:** The UCI Machine Learning Repository API may be unavailable in restricted
+> environments (CI, Streamlit Cloud). In those cases `data_loader.py` automatically generates a
+> 30,000-row synthetic dataset that mirrors the UCI class balance (~22% default) and PAY_* correlation
+> structure, keeping the pipeline runnable anywhere. Metrics above were computed on this synthetic
+> data. On the real UCI dataset, XGBoost typically achieves ROC-AUC ~0.77 and PR-AUC ~0.50–0.55,
+> outperforming logistic regression by ~0.10–0.15 PR-AUC points.
 
 ### Calibration
 A model can rank borrowers correctly (good AUC) yet output miscalibrated probabilities — the
@@ -143,6 +150,20 @@ system — exactly what distinguishes a production-grade credit model from a Kag
 | `data/shap_waterfall_sample.png` | Per-applicant waterfall chart for a sample test-set row |
 | `models/shap_explainer.joblib` | Cached TreeExplainer loaded by `app.py` via `load_explainer()` for fast per-applicant scoring |
 
+## Screenshots
+
+| Description | File |
+|-------------|------|
+| Streamlit scoring app — input form + risk band + SHAP waterfall | `src/app.py` (run locally) |
+| SHAP global importance — beeswarm + mean-\|SHAP\| bar chart | `data/shap_global.png` |
+| Sample per-applicant SHAP waterfall | `data/shap_waterfall_sample.png` |
+| ROC and Precision-Recall curves (both models) | `data/roc_pr.png` |
+| Calibration reliability diagram + Brier scores | `data/calibration.png` |
+| Confusion matrices at operating threshold | `data/confusion_logreg.png`, `data/confusion_xgboost.png` |
+
+> Run `streamlit run src/app.py` to see the live scoring interface. All `data/*.png` plot files
+> are generated automatically by `python src/evaluate.py` and `python -m src.explain`.
+
 ## Tech Stack
 | Layer | Library |
 |-------|----------|
@@ -175,29 +196,33 @@ creditlens/
 ## Running Locally
 
 ```bash
+# 1. Install dependencies (pinned versions)
 pip install -r requirements.txt
 
-# Verify data pipeline (prints (30000, 24))
+# 2. Verify data pipeline (prints (30000, 24) — uses UCI API or synthetic fallback)
 python -c "from src.data_loader import load_raw; print(load_raw().shape)"
 
-# Verify engineered features are leak-free
+# 3. Verify engineered features are leak-free
 python src/features.py
 
-# Train both models
-python src/train.py
+# 4. Train both models (saves models/logreg.joblib and models/xgb.joblib)
+python -m src.train
 
-# Run full evaluation suite (saves plots to data/)
+# 5. Run full evaluation suite (saves ROC/PR/calibration/confusion plots to data/)
 python src/evaluate.py
 
-# Build SHAP explainer + generate global importance + sample waterfall
+# 6. Build SHAP explainer + global importance + sample waterfall
 python -m src.explain
 
-# Load cached explainer in your own code
-# from src.explain import load_explainer, explain_one, plot_waterfall
-
-# Run the Streamlit app (available after Phase 5)
+# 7. Launch the Streamlit scoring app
 streamlit run src/app.py
 ```
+
+### Deploy to Streamlit Cloud (optional)
+1. Push this repo to GitHub (already at `abaooba/creditlens`)
+2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → `abaooba/creditlens` → `main` → `src/app.py`
+3. No secrets or API keys required — click **Deploy**
+4. Replace the `[Live Demo →](#)` link at the top of this README with the public URL
 
 ## Interview Talking Points
 1. **\"Why accuracy is the wrong metric here.\"** Defaults are ~22% of the dataset; a trivial \"always predict no-default\" classifier achieves 78% accuracy while catching zero actual defaults. PR-AUC and recall-at-threshold are the correct objectives for this imbalanced problem.
@@ -214,4 +239,4 @@ streamlit run src/app.py
 | 2 — Preprocessing & Feature Engineering | ✅ complete | 2026-06-16 |
 | 3 — Modeling & Evaluation | ✅ complete | 2026-06-19 |
 | 4 — Explainability | ✅ complete | 2026-06-21 |
-| 5 — App & Polish | pending | — |
+| 5 — App & Polish | ✅ complete | 2026-06-23 |
