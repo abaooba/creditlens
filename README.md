@@ -1,6 +1,6 @@
 # CreditLens — ML Credit Default Risk Scorer
 
-**[Live Demo →](#)** *(deploy to Streamlit Cloud — instructions in [Running Locally](#running-locally))*
+**[Live Demo →](https://creditlens1.streamlit.app/)**
 
 End-to-end machine-learning system that predicts credit card default probability and explains each decision via SHAP. Built on 30,000 real cardholder records from UCI; no API key required.
 
@@ -218,11 +218,7 @@ python -m src.explain
 streamlit run src/app.py
 ```
 
-### Deploy to Streamlit Cloud (optional)
-1. Push this repo to GitHub (already at `abaooba/creditlens`)
-2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → `abaooba/creditlens` → `main` → `src/app.py`
-3. No secrets or API keys required — click **Deploy**
-4. Replace the `[Live Demo →](#)` link at the top of this README with the public URL
+Or just use the live deployment: https://creditlens1.streamlit.app/
 
 ## Interview Talking Points
 1. **\"Why accuracy is the wrong metric here.\"** Defaults are ~22% of the dataset; a trivial \"always predict no-default\" classifier achieves 78% accuracy while catching zero actual defaults. PR-AUC and recall-at-threshold are the correct objectives for this imbalanced problem.
