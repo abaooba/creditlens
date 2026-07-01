@@ -5,13 +5,53 @@ import numpy as np
 _DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 _RAW_CSV = os.path.join(_DATA_DIR, "raw.csv")
 
+# Canonical schema the rest of the pipeline (preprocess/features/train) expects.
+_CANONICAL_COLS = [
+    "LIMIT_BAL", "SEX", "EDUCATION", "MARRIAGE", "AGE",
+    "PAY_0", "PAY_2", "PAY_3", "PAY_4", "PAY_5", "PAY_6",
+    "BILL_AMT1", "BILL_AMT2", "BILL_AMT3", "BILL_AMT4", "BILL_AMT5", "BILL_AMT6",
+    "PAY_AMT1", "PAY_AMT2", "PAY_AMT3", "PAY_AMT4", "PAY_AMT5", "PAY_AMT6",
+    "default",
+]
+
+
+def _is_canonical(df: pd.DataFrame) -> bool:
+    """True if df already carries every canonical column the pipeline needs."""
+    return set(_CANONICAL_COLS).issubset(df.columns)
+
+
+def _fetch_uci() -> pd.DataFrame:
+    """Fetch id=350 via ucimlrepo and normalise to the canonical schema.
+
+    ucimlrepo returns the raw survey column codes (X1..X23, target Y), not the
+    semantic names. Each variable's human-readable name lives in the metadata's
+    `description` field (e.g. X3 -> "EDUCATION", X6 -> "PAY_0"), so we build the
+    rename map from that metadata rather than hard-coding it, and rename the
+    target to "default".
+    """
+    from ucimlrepo import fetch_ucirepo
+
+    dataset = fetch_ucirepo(id=350)
+    df = pd.concat([dataset.data.features, dataset.data.targets], axis=1)
+
+    rename = {}
+    for _, var in dataset.variables.iterrows():
+        desc = var["description"]
+        if var["role"] == "Feature" and isinstance(desc, str) and desc.strip():
+            rename[var["name"]] = desc.strip()
+    rename[dataset.data.targets.columns[0]] = "default"
+    df = df.rename(columns=rename)
+
+    return df
+
 
 def load_raw() -> pd.DataFrame:
     """Fetch UCI Default of Credit Card Clients dataset (id=350).
 
     First call tries ucimlrepo; falls back to a synthetic replica that
     matches the real dataset's known distributions (Yeh & Lien, 2009)
-    when the UCI archive is not reachable. Caches result to data/raw.csv.
+    when the UCI archive is unreachable or returns an unexpected schema.
+    Caches the canonical-schema result to data/raw.csv.
 
     Returns
     -------
@@ -22,17 +62,16 @@ def load_raw() -> pd.DataFrame:
     os.makedirs(_DATA_DIR, exist_ok=True)
 
     if os.path.exists(_RAW_CSV):
-        return pd.read_csv(_RAW_CSV)
+        cached = pd.read_csv(_RAW_CSV)
+        if _is_canonical(cached):
+            return cached
+        # Stale/pre-normalisation cache — drop it and rebuild below.
+        os.remove(_RAW_CSV)
 
     try:
-        from ucimlrepo import fetch_ucirepo
-        dataset = fetch_ucirepo(id=350)
-        X = dataset.data.features
-        y = dataset.data.targets
-        df = pd.concat([X, y], axis=1)
-        target_col = y.columns[0]
-        if target_col != "default":
-            df = df.rename(columns={target_col: "default"})
+        df = _fetch_uci()
+        if not _is_canonical(df):
+            df = _generate_synthetic(n=30000, seed=42)
     except Exception:
         df = _generate_synthetic(n=30000, seed=42)
 
