@@ -39,6 +39,7 @@ _MODELS_DIR = os.path.join(_REPO_DIR, "models")
 _DATA_DIR = os.path.join(_REPO_DIR, "data")
 _XGB_PATH = os.path.join(_MODELS_DIR, "xgb.joblib")
 _CT_PATH = os.path.join(_MODELS_DIR, "preprocess.joblib")
+_EXPLAINER_PATH = os.path.join(_MODELS_DIR, "shap_explainer.joblib")
 
 # PAY_* status codes and their plain-English labels for the UI form
 _PAY_OPTIONS = {
@@ -55,17 +56,64 @@ _PAY_OPTIONS = {
 _PAY_VALUES = list(_PAY_OPTIONS.keys())
 
 
-@st.cache_resource(show_spinner="Loading models…")
+def _bootstrap_artifacts() -> None:
+    """Train and persist the model artifacts in-process when they're missing.
+
+    Runs once on a fresh deployment (e.g. Streamlit Cloud) where the pre-built
+    .joblib files are absent — they're gitignored, so the repo ships source only.
+    The dataset comes from load_raw(), which deterministically falls back to the
+    synthetic replica when the UCI archive is unreachable, so this works with no
+    network access or API key.
+
+    Uses a single fixed XGBoost configuration (within the src.train grid) rather
+    than the offline CV grid search, keeping cold-start to a few seconds. The
+    fully tuned pipeline is still reproducible offline via `python -m src.train`.
+    """
+    from xgboost import XGBClassifier
+    from src.data_loader import load_raw
+    from src.preprocess import build_split
+    from src.explain import build_explainer
+
+    # build_split persists models/preprocess.joblib
+    X_train, _, y_train, _, _ = build_split(load_raw())
+
+    neg = int((y_train == 0).sum())
+    pos = int((y_train == 1).sum())
+    spw = float(neg) / float(pos) if pos else 1.0
+
+    xgb = XGBClassifier(
+        max_depth=5,
+        learning_rate=0.05,
+        n_estimators=400,
+        scale_pos_weight=spw,
+        random_state=42,
+        n_jobs=-1,
+        verbosity=0,
+    )
+    xgb.fit(X_train, y_train)
+    os.makedirs(_MODELS_DIR, exist_ok=True)
+    joblib.dump(xgb, _XGB_PATH)
+
+    # build_explainer persists models/shap_explainer.joblib
+    build_explainer(xgb, X_train)
+
+
+@st.cache_resource(show_spinner="Preparing models (first launch trains the pipeline)…")
 def load_models():
     """Load preprocessor, XGBoost, SHAP explainer, and compute operating threshold.
 
     Returns (ct, xgb, explainer, threshold, error_msg). error_msg is None on success.
     All heavy objects are cached for the process lifetime via @st.cache_resource so
     concurrent users share a single loaded copy.
+
+    On a fresh deployment the artifacts don't exist yet (they're gitignored); the
+    first call trains and persists them via _bootstrap_artifacts() before loading.
     """
-    missing = [p for p in [_XGB_PATH, _CT_PATH] if not os.path.exists(p)]
-    if missing:
-        return None, None, None, None, "\n".join(f"Missing artifact: {p}" for p in missing)
+    if any(not os.path.exists(p) for p in (_XGB_PATH, _CT_PATH, _EXPLAINER_PATH)):
+        try:
+            _bootstrap_artifacts()
+        except Exception as exc:  # surface a clear message instead of a raw stack trace
+            return None, None, None, None, f"Failed to build model artifacts: {exc}"
 
     ct = joblib.load(_CT_PATH)
     xgb = joblib.load(_XGB_PATH)
@@ -258,7 +306,8 @@ def main() -> None:
 
     if err:
         st.error(
-            "**Model artifacts not found.** Run the training pipeline first:\n\n"
+            "**Could not prepare the model.** The app trains its artifacts on first "
+            "launch, but that step failed. You can also build them offline with:\n\n"
             "```bash\npython -m src.train\npython -m src.explain\n```\n\n"
             f"Details: {err}"
         )
